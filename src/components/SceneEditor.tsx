@@ -3,7 +3,6 @@ import { CartoonProject, Character, RoleplayScene, ExpressionType, SoundEffectTy
 import { Plus, Trash2, ArrowUp, ArrowDown, Copy, Sparkles, MessageSquare, Code, Volume2, Smile, Mic, Radio, Upload, Image, Eye, EyeOff, Film } from 'lucide-react';
 import { MicrophoneVoiceRecorder } from './MicrophoneVoiceRecorder';
 import { speakDialogueLine } from '../utils/audioSynthesizer';
-import { generateVisemesForDialogue } from '../utils/textToVisemes';
 
 interface SceneEditorProps {
   project: CartoonProject;
@@ -411,7 +410,8 @@ export const SceneEditor: React.FC<SceneEditorProps> = ({
                     activeSpeaker.style,
                     undefined,
                     activeScene.audioUrl || activeSpeaker.customVoiceUrl,
-                    activeSpeaker.preferredVoiceName
+                    activeSpeaker.preferredVoiceName,
+                    activeSpeaker.voicePreset
                   );
                 }
               }}
@@ -423,15 +423,7 @@ export const SceneEditor: React.FC<SceneEditorProps> = ({
           </div>
           <textarea
             value={activeScene.dialogue}
-            onChange={(e) =>
-              onUpdateScene(activeSceneIndex, {
-                dialogue: e.target.value,
-                // Regenerate lip-sync timing whenever the line changes, so the
-                // Remotion viseme renderer always has real mouth-shape data
-                // instead of falling back to a generic open/close mouth.
-                visemeCues: generateVisemesForDialogue(e.target.value),
-              })
-            }
+            onChange={(e) => onUpdateScene(activeSceneIndex, { dialogue: e.target.value })}
             rows={2}
             className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-purple-500 font-medium"
             placeholder="Type what character says..."
@@ -464,15 +456,7 @@ export const SceneEditor: React.FC<SceneEditorProps> = ({
             label={`Record Voice Line for Scene #${activeSceneIndex + 1}`}
             existingAudioUrl={activeScene.audioUrl}
             pitch={activeSpeaker?.voicePitch ?? 1.0}
-            onAudioSave={(audioUrl, durationMs) =>
-              onUpdateScene(activeSceneIndex, {
-                audioUrl,
-                // Sync scene timing to the real recording length when one
-                // exists; clearing the recording clears the override too,
-                // so export falls back to the dialogue-length estimate.
-                durationSeconds: durationMs ? durationMs / 1000 : undefined,
-              })
-            }
+            onAudioSave={(audioUrl) => onUpdateScene(activeSceneIndex, { audioUrl })}
           />
 
           {/* Quick Scene Step Navigation for Recording All Scenes */}

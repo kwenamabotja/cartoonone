@@ -9,6 +9,8 @@ import {
   stopBackgroundMusic,
   setAudioDucking,
 } from '../utils/audioSynthesizer';
+import { preloadHQDialogueAudio, isHQVoicesEnabled } from '../utils/kokoroTTS';
+import { resolveKokoroVoice } from '../utils/kokoroVoices';
 import {
   Video,
   Download,
@@ -408,8 +410,29 @@ export const VideoRecorderExport: React.FC<VideoRecorderExportProps> = ({
       }
       setRecordedVideoUrl(null);
       setRecordedBlob(null);
-      setIsRecording(true);
       setRecordingProgress(0);
+
+      // Generate every line's HD voice audio up front (free, local) so playback
+      // during capture never stalls waiting on the voice engine mid-recording.
+      if (isHQVoicesEnabled()) {
+        setRecordingStatusText('Preparing free HD voices…');
+        const linesToPreload = project.scenes
+          .filter((sc) => !sc.audioUrl)
+          .map((sc) => {
+            const speaker = project.characters.find((c) => c.name === sc.speaker);
+            const { kokoroVoice, speed } = resolveKokoroVoice(speaker?.voicePreset, speaker?.style);
+            return {
+              text: sc.dialogue,
+              kokoroVoice,
+              speed: speed * Math.max(0.5, Math.min(1.6, speaker?.voiceRate ?? 1.0)),
+            };
+          });
+        await preloadHQDialogueAudio(linesToPreload, (done, total) => {
+          setRecordingStatusText(`Preparing free HD voices… (${done}/${total})`);
+        });
+      }
+
+      setIsRecording(true);
       recordedChunksRef.current = [];
       isCapturingRef.current = true;
       onRecordStart();
@@ -543,7 +566,8 @@ export const VideoRecorderExport: React.FC<VideoRecorderExportProps> = ({
             speaker?.style ?? 'dog',
             () => safeResolve(),
             customAudio,
-            speaker?.preferredVoiceName
+            speaker?.preferredVoiceName,
+            speaker?.voicePreset
           );
 
           // Safety fallback timer if speech synthesis or audio hangs

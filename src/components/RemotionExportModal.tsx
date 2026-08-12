@@ -19,10 +19,8 @@ import {
   ShieldCheck,
   Maximize2,
   Sliders,
-  FileText,
 } from 'lucide-react';
 import { generateBroadcastChapterMetadata, BroadcastMetadata } from '../utils/chapterMetadata';
-import { generateSRT, generateVTT, downloadCaptionFile } from '../utils/captionsExport';
 import { BroadcastSafeAreas } from '../remotion/BroadcastSafeAreas';
 import { playSoundEffect } from '../utils/audioSynthesizer';
 
@@ -40,7 +38,7 @@ export const RemotionExportModal: React.FC<RemotionExportModalProps> = ({
   const [resolution, setResolution] = useState<'1080p' | '4K'>('1080p');
   const [showSafeAreas, setShowSafeAreas] = useState(true);
   const [tvRating, setTvRating] = useState<'TV-Y7' | 'TV-G' | 'TV-14'>('TV-Y7');
-  const [activeTab, setActiveTab] = useState<'preview' | 'chapters' | 'captions' | 'specs'>('preview');
+  const [activeTab, setActiveTab] = useState<'preview' | 'chapters' | 'specs'>('preview');
 
   // Playback & Export State
   const [isPlaying, setIsPlaying] = useState(false);
@@ -353,7 +351,6 @@ export const RemotionExportModal: React.FC<RemotionExportModalProps> = ({
             {[
               { id: 'preview', label: 'Remotion 24fps Canvas Player', icon: Video },
               { id: 'chapters', label: 'YouTube Chapter Metadata', icon: Youtube },
-              { id: 'captions', label: 'Closed Captions (.srt/.vtt)', icon: FileText },
               { id: 'specs', label: 'Broadcast Compliance Specs', icon: ShieldCheck },
             ].map((tab) => {
               const Icon = tab.icon;
@@ -524,54 +521,6 @@ export const RemotionExportModal: React.FC<RemotionExportModalProps> = ({
                 value={metadata.youtubeDescription}
                 className="w-full h-32 bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-300 font-mono focus:outline-none"
               />
-            </div>
-          </div>
-        )}
-
-        {/* TAB: CLOSED CAPTIONS EXPORT (.srt / .vtt) */}
-        {activeTab === 'captions' && (
-          <div className="space-y-4 bg-slate-900/60 p-4 rounded-2xl border border-slate-800">
-            <div>
-              <h3 className="text-sm font-black text-yellow-300 flex items-center gap-2">
-                <FileText className="w-4 h-4 text-cyan-400" />
-                <span>Downloadable Closed Caption Files</span>
-              </h3>
-              <p className="text-xs text-slate-400">
-                Generated from the same scene timing used for export, so captions line up with the
-                video. Ship these alongside your upload — YouTube indexes caption text for search,
-                lets viewers watch sound-off, and it's an accessibility requirement for broadcast
-                delivery.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-3">
-              <button
-                onClick={() =>
-                  downloadCaptionFile(generateSRT(project), `${project.title.replace(/\s+/g, '_')}.srt`)
-                }
-                className="px-4 py-2.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black rounded-xl text-xs flex items-center gap-2 cursor-pointer shadow-lg"
-              >
-                <Download className="w-4 h-4" />
-                <span>Download .srt (SubRip)</span>
-              </button>
-
-              <button
-                onClick={() =>
-                  downloadCaptionFile(generateVTT(project), `${project.title.replace(/\s+/g, '_')}.vtt`)
-                }
-                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-black rounded-xl text-xs flex items-center gap-2 cursor-pointer"
-              >
-                <Download className="w-4 h-4" />
-                <span>Download .vtt (WebVTT)</span>
-              </button>
-            </div>
-
-            {/* Live Preview of Generated SRT */}
-            <div className="space-y-1.5">
-              <span className="text-[11px] font-bold text-slate-400">Preview (.srt):</span>
-              <pre className="bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-[11px] text-emerald-400 overflow-x-auto max-h-56 whitespace-pre-wrap">
-                {generateSRT(project) || 'No dialogue scenes to caption yet.'}
-              </pre>
             </div>
           </div>
         )}

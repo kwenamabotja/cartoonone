@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Volume2, VolumeX, Sliders, Music, Mic, Radio, Sparkles, X, Activity, ShieldCheck, Zap, Gauge } from 'lucide-react';
-import { dspMixer, DSPTrackName, DSPState, LoudnessTargetPreset, LOUDNESS_TARGETS } from '../utils/audioDSP';
+import { Volume2, VolumeX, Sliders, Music, Mic, Radio, Sparkles, X, Activity, ShieldCheck, Zap } from 'lucide-react';
+import { dspMixer, DSPTrackName, DSPState } from '../utils/audioDSP';
 import { playSoundEffect } from '../utils/audioSynthesizer';
 
 interface AudioDspMixerModalProps {
@@ -21,16 +21,6 @@ export const AudioDspMixerModal: React.FC<AudioDspMixerModalProps> = ({
       dspMixer.init();
       setDspState(dspMixer.getState());
     }
-  }, [isOpen]);
-
-  // Poll the measured-loudness reading while the mixer is open so the LUFS
-  // meter reflects what's actually playing, not just a snapshot from open time.
-  useEffect(() => {
-    if (!isOpen) return;
-    const interval = setInterval(() => {
-      setDspState(dspMixer.getState());
-    }, 500);
-    return () => clearInterval(interval);
   }, [isOpen]);
 
   // Sync dialogue active ducking when speech prop changes
@@ -54,16 +44,6 @@ export const AudioDspMixerModal: React.FC<AudioDspMixerModalProps> = ({
 
   const handleReverbChange = (val: number) => {
     dspMixer.setReverbLevel(val);
-    setDspState(dspMixer.getState());
-  };
-
-  const handleLoudnessTargetChange = (target: LoudnessTargetPreset) => {
-    dspMixer.setLoudnessTarget(target);
-    setDspState(dspMixer.getState());
-  };
-
-  const handleAutoNormalizeToggle = () => {
-    dspMixer.setAutoNormalizeEnabled(!dspState.autoNormalizeEnabled);
     setDspState(dspMixer.getState());
   };
 
@@ -247,60 +227,6 @@ export const AudioDspMixerModal: React.FC<AudioDspMixerModalProps> = ({
             <span>25% (Acoustic Stage)</span>
             <span>50% (Concert Hall Reverb)</span>
           </div>
-        </div>
-
-        {/* LOUDNESS NORMALIZATION (YouTube / Broadcast TV Delivery Standards) */}
-        <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800 space-y-3">
-          <div className="flex items-center justify-between text-xs font-black text-slate-200">
-            <span className="flex items-center gap-2">
-              <Gauge className="w-4 h-4 text-emerald-400" />
-              <span>Integrated Loudness Normalization:</span>
-            </span>
-            <span className="font-mono text-[10px] bg-slate-950 px-2 py-1 rounded border border-emerald-400/40 text-emerald-300">
-              {dspState.measuredLUFS !== null ? `${dspState.measuredLUFS} LUFS` : 'measuring…'}
-              {dspState.loudnessTarget !== 'off' && ` / target ${LOUDNESS_TARGETS[dspState.loudnessTarget]} LUFS`}
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {(
-              [
-                { key: 'youtube', label: `YouTube (${LOUDNESS_TARGETS.youtube} LUFS)` },
-                { key: 'broadcast_tv', label: `Broadcast TV (${LOUDNESS_TARGETS.broadcast_tv} LUFS)` },
-                { key: 'off', label: 'Off (Raw Mix)' },
-              ] as { key: LoudnessTargetPreset; label: string }[]
-            ).map((opt) => (
-              <button
-                key={opt.key}
-                onClick={() => handleLoudnessTargetChange(opt.key)}
-                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${
-                  dspState.loudnessTarget === opt.key
-                    ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200'
-                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-
-            <button
-              onClick={handleAutoNormalizeToggle}
-              disabled={dspState.loudnessTarget === 'off'}
-              className={`ml-auto px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-                dspState.autoNormalizeEnabled
-                  ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200'
-                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-              }`}
-            >
-              Auto-Normalize: {dspState.autoNormalizeEnabled ? 'ON' : 'OFF'}
-            </button>
-          </div>
-          <p className="text-[10px] text-slate-500">
-            Slowly rides the master gain toward the target so an episode isn't quieter or louder
-            than others when uploaded — YouTube normalizes playback to ~-14 LUFS anyway, so mixing
-            to it directly avoids the platform doing it inconsistently for you. Approximate rolling
-            estimate, not a certified broadcast meter.
-          </p>
         </div>
 
         {/* TEST FOLEY SOUND FX BUTTONS */}

@@ -3,7 +3,6 @@ import { CartoonProject, CharacterStyle, BackgroundTheme, TopicCategory } from '
 import { Sparkles, Wand2, AlertCircle, Loader2, X, Volume2, Sliders, AudioWaveform, Users, User } from 'lucide-react';
 import { MicrophoneVoiceRecorder } from './MicrophoneVoiceRecorder';
 import { speakDialogueLine, CARTOON_VOICE_PRESETS } from '../utils/audioSynthesizer';
-import { generateVisemesForDialogue } from '../utils/textToVisemes';
 
 interface ScriptGeneratorModalProps {
   isOpen: boolean;
@@ -331,7 +330,7 @@ export const ScriptGeneratorModal: React.FC<ScriptGeneratorModalProps> = ({
           handGesture: s.handGesture || 'none',
           sceneTransition: s.sceneTransition || 'fade',
           timingHoldMs: s.timingHoldMs || 600,
-          visemeCues: (s.visemeCues && s.visemeCues.length > 0) ? s.visemeCues : generateVisemesForDialogue(s.dialogue),
+          visemeCues: s.visemeCues || [],
           actNumber: s.actNumber || (idx < Math.ceil(data.scenes.length * 0.25) ? 1 : idx < Math.ceil(data.scenes.length * 0.75) ? 2 : 3),
           actName: s.actName || (s.actNumber === 1 ? 'Act 1: Cold Open & Setup' : s.actNumber === 3 ? 'Act 3: Resolution & Outro' : 'Act 2: Escalation & Hijinks'),
           codeSnippet: s.codeSnippet || '',

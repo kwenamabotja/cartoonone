@@ -202,7 +202,8 @@ export default function App() {
           speaker?.style ?? 'dog',
           () => safeResolve(),
           customAudio,
-          speaker?.preferredVoiceName
+          speaker?.preferredVoiceName,
+          speaker?.voicePreset
         );
         speechCancelRef.current = speech.cancel;
 

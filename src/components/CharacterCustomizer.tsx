@@ -21,6 +21,12 @@ import {
   X,
 } from 'lucide-react';
 import { speakDialogueLine, getAvailableVoices, CARTOON_VOICE_PRESETS } from '../utils/audioSynthesizer';
+import {
+  isHQVoicesEnabled,
+  setHQVoicesEnabled,
+  subscribeHQVoiceStatus,
+  getHQVoiceStatus,
+} from '../utils/kokoroTTS';
 import { MicrophoneVoiceRecorder } from './MicrophoneVoiceRecorder';
 
 interface CharacterCustomizerProps {
@@ -41,6 +47,18 @@ export const CharacterCustomizer: React.FC<CharacterCustomizerProps> = ({
   const [quickVoiceTake, setQuickVoiceTake] = useState<string | undefined>(undefined);
   const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [testingCharId, setTestingCharId] = useState<string | null>(null);
+  const [hqEnabled, setHqEnabledState] = useState(false);
+  const [hqVoiceStatus, setHqVoiceStatus] = useState(getHQVoiceStatus());
+
+  useEffect(() => {
+    setHqEnabledState(isHQVoicesEnabled());
+    return subscribeHQVoiceStatus(setHqVoiceStatus);
+  }, []);
+
+  const handleToggleHQVoices = (enabled: boolean) => {
+    setHQVoicesEnabled(enabled);
+    setHqEnabledState(enabled);
+  };
 
   useEffect(() => {
     const loadVoices = () => {
@@ -112,7 +130,8 @@ export const CharacterCustomizer: React.FC<CharacterCustomizerProps> = ({
       char.style,
       () => setTestingCharId(null),
       char.customVoiceUrl,
-      char.preferredVoiceName
+      char.preferredVoiceName,
+      char.voicePreset
     );
     setTimeout(() => {
       setTestingCharId((prev) => (prev === char.id ? null : prev));
@@ -178,6 +197,53 @@ export const CharacterCustomizer: React.FC<CharacterCustomizerProps> = ({
             </button>
           )}
         </div>
+      </div>
+
+      {/* FREE HD AI VOICE TOGGLE */}
+      <div className="bg-slate-950/90 border border-emerald-700/40 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <AudioWaveform className="w-5 h-5 text-emerald-400 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-xs font-black uppercase tracking-wider text-emerald-400">
+              Free HD AI Voices {hqVoiceStatus.status === 'ready' ? '(Ready)' : ''}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-0.5 max-w-md">
+              Replaces robotic browser voices with a real free AI voice model that runs locally on your
+              device — no account, no API key, no cost. First use downloads the voice model once (~85MB).
+            </p>
+            {hqVoiceStatus.status === 'loading' && (
+              <div className="mt-2 w-full max-w-xs">
+                <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-emerald-500 transition-all"
+                    style={{ width: `${hqVoiceStatus.progress}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1">{hqVoiceStatus.message}</p>
+              </div>
+            )}
+            {hqVoiceStatus.status === 'unsupported' && (
+              <p className="text-[10px] text-amber-400 mt-1">
+                Not supported in this browser — using standard browser voices instead.
+              </p>
+            )}
+            {hqVoiceStatus.status === 'error' && (
+              <p className="text-[10px] text-red-400 mt-1">{hqVoiceStatus.message}</p>
+            )}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => handleToggleHQVoices(!hqEnabled)}
+          disabled={hqVoiceStatus.status === 'unsupported'}
+          className={`px-4 py-2 rounded-xl text-xs font-black transition-all active:scale-95 flex-shrink-0 ${
+            hqEnabled
+              ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950'
+              : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+          } disabled:opacity-40 disabled:cursor-not-allowed`}
+        >
+          {hqEnabled ? 'Enabled ✓' : 'Enable (Free)'}
+        </button>
       </div>
 
       {/* FEATURED CARTOON CAST SIZE SELECTOR */}

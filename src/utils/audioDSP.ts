@@ -3,17 +3,6 @@ import { getAudioContext } from './audioSynthesizer';
 
 export type DSPTrackName = 'dialogue' | 'ambient' | 'foley' | 'music';
 
-export type LoudnessTargetPreset = 'youtube' | 'broadcast_tv' | 'off';
-
-// Integrated loudness targets in LUFS. YouTube normalizes uploaded audio to
-// roughly -14 LUFS integrated; ATSC A/85 (US broadcast TV delivery) targets
-// -24 LUFS. Mixing to these up front means the platform won't turn an
-// episode up or down inconsistently against other channels/episodes.
-export const LOUDNESS_TARGETS: Record<Exclude<LoudnessTargetPreset, 'off'>, number> = {
-  youtube: -14,
-  broadcast_tv: -24,
-};
-
 export interface DSPTrackConfig {
   volume: number; // 0 to 1
   muted: boolean;
@@ -26,10 +15,6 @@ export interface DSPState {
   reverbPreset: 'studio' | 'room' | 'hall' | 'none';
   masterVolume: number;
   tracks: Record<DSPTrackName, DSPTrackConfig>;
-  // Loudness normalization
-  loudnessTarget: LoudnessTargetPreset;
-  autoNormalizeEnabled: boolean;
-  measuredLUFS: number | null; // rolling integrated-loudness estimate, or null before enough audio has played
 }
 
 class AudioDSPMixer {
@@ -51,16 +36,6 @@ class AudioDSPMixer {
   // Music Ducking Node
   private musicDuckingGain: GainNode | null = null;
 
-  // Loudness Normalization: makeup gain applied before final compression,
-  // driven by a K-weighting-approximation filter chain + analysis tap.
-  private loudnessMakeupGain: GainNode | null = null;
-  private loudnessFilterStage1: BiquadFilterNode | null = null; // high-shelf (ITU-R BS.1770 stage 1 approximation)
-  private loudnessFilterStage2: BiquadFilterNode | null = null; // high-pass (ITU-R BS.1770 stage 2 approximation)
-  private loudnessProcessor: ScriptProcessorNode | null = null;
-  private loudnessSilentSink: GainNode | null = null; // keeps the processor node pulled without producing audible output
-  private loudnessRollingBlocks: number[] = []; // recent block mean-square values, used as a short integration window
-  private static readonly LOUDNESS_WINDOW_BLOCKS = 40; // ~3-4s of history at default buffer size
-
   // Active Ambient / Music Oscillators / Buffers
   private ambientSourceNode: AudioNode | null = null;
   private musicInterval: any = null;
@@ -78,9 +53,6 @@ class AudioDSPMixer {
       foley: { volume: 0.8, muted: false },
       music: { volume: 0.45, muted: false },
     },
-    loudnessTarget: 'youtube',
-    autoNormalizeEnabled: true,
-    measuredLUFS: null,
   };
 
   private isInitialized = false;
@@ -104,47 +76,10 @@ class AudioDSPMixer {
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.setValueAtTime(this.state.masterVolume, this.ctx.currentTime);
 
-      // 2b. Loudness Makeup Gain — sits between master gain and the final
-      // compressor, continuously nudged by the loudness analysis tap below
-      // to bring the mix toward the selected LUFS target.
-      this.loudnessMakeupGain = this.ctx.createGain();
-      this.loudnessMakeupGain.gain.setValueAtTime(1.0, this.ctx.currentTime);
-
-      // Connect Master Gain -> Loudness Makeup -> Master Compressor -> Speakers & Recording Stream
-      this.masterGain.connect(this.loudnessMakeupGain);
-      this.loudnessMakeupGain.connect(this.masterCompressor);
+      // Connect Master Gain -> Master Compressor -> Speakers & Recording Stream
+      this.masterGain.connect(this.masterCompressor);
       this.masterCompressor.connect(this.ctx.destination);
       this.masterCompressor.connect(destinationNode);
-
-      // 2c. Loudness Analysis Tap — approximates ITU-R BS.1770 K-weighting
-      // with a high-shelf + high-pass biquad pair, then measures mean-square
-      // energy of the actual mixed output to estimate integrated LUFS.
-      // This taps the post-compression signal (what actually gets sent to
-      // the listener/export) without feeding back into the audible chain.
-      this.loudnessFilterStage1 = this.ctx.createBiquadFilter();
-      this.loudnessFilterStage1.type = 'highshelf';
-      this.loudnessFilterStage1.frequency.setValueAtTime(1681.97, this.ctx.currentTime);
-      this.loudnessFilterStage1.gain.setValueAtTime(3.99881, this.ctx.currentTime);
-
-      this.loudnessFilterStage2 = this.ctx.createBiquadFilter();
-      this.loudnessFilterStage2.type = 'highpass';
-      this.loudnessFilterStage2.frequency.setValueAtTime(38.13, this.ctx.currentTime);
-      this.loudnessFilterStage2.Q.setValueAtTime(0.5, this.ctx.currentTime);
-
-      // ScriptProcessorNode is deprecated but remains the simplest
-      // cross-browser way to read raw samples without an external
-      // AudioWorklet module/build step.
-      this.loudnessProcessor = this.ctx.createScriptProcessor(4096, 2, 2);
-      this.loudnessProcessor.onaudioprocess = (event) => this.handleLoudnessAnalysis(event);
-
-      this.loudnessSilentSink = this.ctx.createGain();
-      this.loudnessSilentSink.gain.setValueAtTime(0, this.ctx.currentTime);
-
-      this.masterCompressor.connect(this.loudnessFilterStage1);
-      this.loudnessFilterStage1.connect(this.loudnessFilterStage2);
-      this.loudnessFilterStage2.connect(this.loudnessProcessor);
-      this.loudnessProcessor.connect(this.loudnessSilentSink);
-      this.loudnessSilentSink.connect(this.ctx.destination);
 
       // 3. Room Impulse Response Convolver Node (Reverb)
       this.convolver = this.ctx.createConvolver();
@@ -214,57 +149,6 @@ class AudioDSPMixer {
     return buffer;
   }
 
-  // Analyze the post-compression mix for integrated loudness (approximate
-  // ITU-R BS.1770 method: K-weight, mean-square, LUFS = -0.691 + 10*log10(MS))
-  // and slowly nudge the makeup gain toward the selected target. This is an
-  // ungated rolling estimate (no silence-gating blocks like a certified
-  // meter) — good enough to auto-level a mix consistently, not a substitute
-  // for a real loudness meter before final delivery.
-  private handleLoudnessAnalysis(event: AudioProcessingEvent) {
-    const input = event.inputBuffer;
-    const left = input.getChannelData(0);
-    const right = input.numberOfChannels > 1 ? input.getChannelData(1) : left;
-
-    let sumSquares = 0;
-    for (let i = 0; i < left.length; i++) {
-      const sampleAvg = (left[i] + right[i]) / 2;
-      sumSquares += sampleAvg * sampleAvg;
-    }
-    const blockMeanSquare = sumSquares / left.length;
-
-    this.loudnessRollingBlocks.push(blockMeanSquare);
-    if (this.loudnessRollingBlocks.length > AudioDSPMixer.LOUDNESS_WINDOW_BLOCKS) {
-      this.loudnessRollingBlocks.shift();
-    }
-
-    const windowMeanSquare =
-      this.loudnessRollingBlocks.reduce((a, b) => a + b, 0) / this.loudnessRollingBlocks.length;
-
-    // Skip near-silence (nothing playing) so the meter/gain doesn't chase noise floor.
-    if (windowMeanSquare < 1e-9) {
-      return;
-    }
-
-    const estimatedLUFS = -0.691 + 10 * Math.log10(windowMeanSquare);
-    this.state.measuredLUFS = Math.round(estimatedLUFS * 10) / 10;
-
-    if (!this.ctx || !this.loudnessMakeupGain) return;
-    if (!this.state.autoNormalizeEnabled || this.state.loudnessTarget === 'off') return;
-
-    const targetLUFS = LOUDNESS_TARGETS[this.state.loudnessTarget];
-    const deltaDb = targetLUFS - estimatedLUFS;
-    const currentMakeup = this.loudnessMakeupGain.gain.value;
-    let desiredMakeup = currentMakeup * Math.pow(10, deltaDb / 20);
-
-    // Clamp to a sane range (-20dB to +12dB overall makeup) so a bad
-    // reading can't runaway the gain to silence or clipping.
-    desiredMakeup = Math.max(0.1, Math.min(4.0, desiredMakeup));
-
-    // Slow exponential approach (multi-second time constant) — this is a
-    // leveler, not a limiter, so it should never be audible as pumping.
-    this.loudnessMakeupGain.gain.setTargetAtTime(desiredMakeup, this.ctx.currentTime, 2.5);
-  }
-
   // Automatic Music Ducking Controller
   public setDialogueActive(active: boolean) {
     this.init();
@@ -309,30 +193,6 @@ class AudioDSPMixer {
       this.convolverWetGain.gain.setValueAtTime(this.state.reverbWetLevel, now);
       this.convolverDryGain.gain.setValueAtTime(1 - this.state.reverbWetLevel, now);
     }
-  }
-
-  // Set Loudness Normalization Target (YouTube ~-14 LUFS, Broadcast TV ~-24 LUFS, or off)
-  public setLoudnessTarget(target: LoudnessTargetPreset) {
-    this.init();
-    this.state.loudnessTarget = target;
-    if (target === 'off' && this.ctx && this.loudnessMakeupGain) {
-      // Ease back to unity gain rather than snapping, to avoid a jump.
-      this.loudnessMakeupGain.gain.setTargetAtTime(1.0, this.ctx.currentTime, 2.5);
-    }
-  }
-
-  // Toggle whether the makeup gain actively chases the loudness target,
-  // independent of which target is selected (lets a user watch the meter
-  // without the mix changing under them).
-  public setAutoNormalizeEnabled(enabled: boolean) {
-    this.init();
-    this.state.autoNormalizeEnabled = enabled;
-  }
-
-  // Current rolling integrated-loudness estimate in LUFS, or null until
-  // enough audio has played to produce a reading.
-  public getMeasuredLoudnessLUFS(): number | null {
-    return this.state.measuredLUFS;
   }
 
   // Get Output Node for Dialogue Track Routing

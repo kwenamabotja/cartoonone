@@ -1,5 +1,7 @@
 import { SoundEffectType } from '../types';
 import { dspMixer } from './audioDSP';
+import { generateHQDialogueAudio, isHQVoicesEnabled } from './kokoroTTS';
+import { resolveKokoroVoice } from './kokoroVoices';
 
 let audioCtx: AudioContext | null = null;
 let mediaDestinationNode: MediaStreamAudioDestinationNode | null = null;
@@ -537,59 +539,11 @@ export const CARTOON_VOICE_PRESETS: VoicePresetOption[] = [
   { id: 'calm', label: '🎓 Calm Educator', category: '✨ Classic & Fantasy Cartoons', pitch: 1.0, rate: 1.0 },
 ];
 
-/**
- * Measure the real playback duration (ms) of a recorded audio clip
- * (base64 data URL or object URL) by loading it into a detached <audio>
- * element and reading its metadata — no playback/sound is produced.
- *
- * Used to replace the dialogue.length * 65ms guess with the actual
- * duration of a real mic recording, so scene timing and exported video
- * stay in sync with what was actually recorded instead of an estimate.
- */
-export function measureAudioDurationMs(audioDataUrl: string): Promise<number> {
-  return new Promise((resolve) => {
-    if (!audioDataUrl) {
-      resolve(0);
-      return;
-    }
-    const audio = new Audio();
-    let settled = false;
-    const finish = (ms: number) => {
-      if (settled) return;
-      settled = true;
-      resolve(ms);
-    };
-
-    audio.addEventListener('loadedmetadata', () => {
-      if (isFinite(audio.duration) && audio.duration > 0) {
-        finish(Math.round(audio.duration * 1000));
-      } else {
-        // Some codecs (notably webm/opus from MediaRecorder) report
-        // Infinity for duration until a seek forces a full parse.
-        audio.currentTime = 1e10;
-        audio.addEventListener(
-          'durationchange',
-          () => {
-            if (isFinite(audio.duration) && audio.duration > 0) {
-              finish(Math.round(audio.duration * 1000));
-            } else {
-              finish(0);
-            }
-          },
-          { once: true }
-        );
-      }
-    });
-    audio.addEventListener('error', () => finish(0));
-    // Safety timeout so a bad/unsupported file never hangs the caller.
-    setTimeout(() => finish(0), 4000);
-
-    audio.src = audioDataUrl;
-  });
-}
-
-// Speak Dialogue line using Web Speech API with fallback to custom audio or cartoon speech bleeps
-export function speakDialogueLine(
+// Speak Dialogue line using Web Speech API with fallback to custom audio or cartoon speech bleeps.
+// This is the original OS-voice implementation. It's kept as the automatic
+// fallback for browsers where the free HQ voice engine can't run, and for
+// the brief moment before the HQ engine finishes loading.
+export function speakDialogueLineBrowserTTS(
   text: string,
   pitch = 1.0,
   rate = 1.0,
@@ -710,6 +664,65 @@ export function speakDialogueLine(
       },
     };
   }
+}
+
+// Speak a dialogue line using free, local HQ AI voices (Kokoro) when available,
+// automatically falling back to the browser's built-in speechSynthesis voices
+// (speakDialogueLineBrowserTTS above) if HQ voices are off, unsupported, still
+// downloading for the first time, or generation fails for any reason.
+// Same call signature as before, so every existing call site keeps working —
+// with an optional trailing voicePresetId for a better voice match.
+export function speakDialogueLine(
+  text: string,
+  pitch = 1.0,
+  rate = 1.0,
+  style = 'dog',
+  onEnd?: () => void,
+  customAudioUrl?: string,
+  preferredVoiceName?: string,
+  voicePresetId?: string
+): { cancel: () => void } {
+  if (customAudioUrl) {
+    return playCustomAudio(customAudioUrl, pitch, onEnd);
+  }
+
+  if (!isHQVoicesEnabled()) {
+    return speakDialogueLineBrowserTTS(text, pitch, rate, style, onEnd, customAudioUrl, preferredVoiceName);
+  }
+
+  let isCancelled = false;
+  let fallbackHandle: { cancel: () => void } | null = null;
+  let hqPlaybackHandle: { cancel: () => void } | null = null;
+
+  const { kokoroVoice, speed, pitchShift } = resolveKokoroVoice(voicePresetId, style);
+
+  generateHQDialogueAudio(text, kokoroVoice, speed * Math.max(0.5, Math.min(1.6, rate)))
+    .then((blobUrl) => {
+      if (isCancelled) return;
+      hqPlaybackHandle = playCustomAudio(blobUrl, pitchShift, onEnd);
+    })
+    .catch(() => {
+      // Free HQ engine unavailable/still loading/failed this line — fall back
+      // to the browser voice so playback never silently does nothing.
+      if (isCancelled) return;
+      fallbackHandle = speakDialogueLineBrowserTTS(
+        text,
+        pitch,
+        rate,
+        style,
+        onEnd,
+        customAudioUrl,
+        preferredVoiceName
+      );
+    });
+
+  return {
+    cancel: () => {
+      isCancelled = true;
+      fallbackHandle?.cancel();
+      hqPlaybackHandle?.cancel();
+    },
+  };
 }
 
 // -------------------------------------------------------------

@@ -1,15 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Mic, Square, Play, Trash2, Volume2, Check, Radio, Sparkles, AlertCircle } from 'lucide-react';
-import { playCustomAudio, measureAudioDurationMs } from '../utils/audioSynthesizer';
+import { playCustomAudio } from '../utils/audioSynthesizer';
 
 interface MicrophoneVoiceRecorderProps {
   label?: string;
   existingAudioUrl?: string;
   pitch?: number;
-  // durationMs is the real measured length of the recording (or undefined
-  // when the recording is cleared), so callers can sync scene timing to
-  // what was actually recorded instead of a text-length estimate.
-  onAudioSave: (audioDataUrl: string | undefined, durationMs?: number) => void;
+  onAudioSave: (audioDataUrl: string | undefined) => void;
 }
 
 export const MicrophoneVoiceRecorder: React.FC<MicrophoneVoiceRecorderProps> = ({
@@ -72,11 +69,10 @@ export const MicrophoneVoiceRecorder: React.FC<MicrophoneVoiceRecorderProps> = (
         const blob = new Blob(audioChunksRef.current, { type: mimeType });
         const reader = new FileReader();
         reader.readAsDataURL(blob);
-        reader.onloadend = async () => {
+        reader.onloadend = () => {
           const base64data = reader.result as string;
           setAudioUrl(base64data);
-          const durationMs = await measureAudioDurationMs(base64data);
-          onAudioSave(base64data, durationMs || undefined);
+          onAudioSave(base64data);
         };
       };
 

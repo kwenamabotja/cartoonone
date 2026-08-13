@@ -1,6 +1,0 @@
-{
-  "name": "Cartoon Studio",
-  "description": "Create animated educational roleplay cartoons for kids on any topic - Science, Math, Coding, Space, History, and more - with speech synthesis and YouTube video export.",
-  "requestFramePermissions": ["microphone"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
